@@ -1,0 +1,85 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+:root {
+  color-scheme: dark;
+}
+
+html {
+  scroll-behavior: smooth;
+}
+
+body {
+  @apply bg-slate-950 text-slate-100 antialiased;
+  background-image:
+    radial-gradient(circle at top, rgba(96, 165, 250, 0.18), transparent 24%),
+    linear-gradient(180deg, #020817 0%, #0b1120 30%, #111827 100%);
+}
+
+* {
+  box-sizing: border-box;
+}
+
+.glass-card {
+  @apply rounded-2xl border border-white/10 bg-white/5 backdrop-blur-xl shadow-[0_0_30px_rgba(59,130,246,0.12)];
+}
+
+.gradient-border {
+  background: linear-gradient(135deg, rgba(96,165,250,0.9), rgba(139,92,246,0.9), rgba(34,197,94,0.7));
+  padding: 1px;
+  border-radius: 1rem;
+}
+
+.btn-primary {
+  @apply inline-flex items-center justify-center rounded-full bg-gradient-to-r from-blue-500 to-violet-500 px-5 py-3 font-medium text-white shadow-glow transition hover:opacity-90;
+}
+
+.btn-secondary {
+  @apply inline-flex items-center justify-center rounded-full border border-white/15 bg-slate-900/60 px-5 py-3 font-medium text-slate-200 transition hover:border-blue-400/60 hover:text-white;
+}
+
+.grid-bg {
+  background-image: linear-gradient(rgba(148,163,184,0.08) 1px, transparent 1px), linear-gradient(90deg, rgba(148,163,184,0.08) 1px, transparent 1px);
+  background-size: 28px 28px;
+}
+
+.scan-ring {
+  position: relative;
+  width: 270px;
+  height: 270px;
+  border-radius: 9999px;
+  background: radial-gradient(circle, rgba(59,130,246,0.4), rgba(15,23,42,0.2) 55%, transparent 70%);
+  display: grid;
+  place-items: center;
+  overflow: hidden;
+}
+
+.scan-ring::before {
+  content: "";
+  position: absolute;
+  inset: 12%;
+  border: 1px solid rgba(96,165,250,0.4);
+  border-radius: 9999px;
+  animation: pulse 3s infinite ease-in-out;
+}
+
+.scan-ring::after {
+  content: "";
+  position: absolute;
+  inset: 0;
+  border-radius: 9999px;
+  background: conic-gradient(from 0deg, rgba(96,165,250,0.15), rgba(167,139,250,0.3), rgba(34,197,94,0.25), rgba(96,165,250,0.15));
+  mask: radial-gradient(circle, transparent 57%, black 60%);
+  animation: spin 12s linear infinite;
+}
+
+@keyframes pulse {
+  0%, 100% { transform: scale(0.98); opacity: 0.8; }
+  50% { transform: scale(1.04); opacity: 1; }
+}
+
+@keyframes spin {
+  from { transform: rotate(0deg); }
+  to { transform: rotate(360deg); }
+}

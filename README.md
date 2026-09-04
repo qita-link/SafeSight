@@ -191,7 +191,6 @@ docker compose down
 - PostgreSQL 的 `5432` 和 Redis 的 `6379` 不要暴露到公网。
 - 将 `NEXT_PUBLIC_API_URL` 设置为浏览器可以访问的 API 域名，例如 `https://api.example.com`。
 - 生产环境关闭 `--reload`，并配置数据库备份、日志和 worker。
-- 不要把 `.env`、`DEEPSEEK_API_KEY`、SMTP 密码或生产 JWT 密钥提交到 Git。
 
 开发环境可以保留 Compose 中的端口映射；正式环境建议移除 PostgreSQL 和 Redis 的 `ports` 配置。
 
@@ -239,3 +238,14 @@ docker compose ps postgres
 ## 架构文档
 
 完整架构设计见 [docs/architecture.md](docs/architecture.md)。
+
+## 开源协议与关于我们
+
+### 开源协议
+
+> [!IMPORTANT]
+> 本项目基于 [MIT License](LICENSE) 开源。您可以自由使用、修改和分发本项目，但须在软件的所有副本或重要部分中保留原始版权及许可声明。
+
+### 关于我们
+
+我们是热爱计算机的大学生

@@ -1,11 +1,17 @@
 import ipaddress
+import json
 import socket
+from datetime import datetime, timezone
 from time import perf_counter
 from urllib.parse import urlparse
 
 import httpx
-from fastapi import APIRouter, HTTPException, status
+from fastapi import APIRouter, Depends, HTTPException, status
 from pydantic import BaseModel, HttpUrl, field_validator
+
+from app.config import settings
+from app.core.security import get_current_user, get_optional_user
+from app.db import ScanEvent, ScanSchedule, SessionLocal, User
 
 router = APIRouter(tags=['scan'])
 
@@ -35,6 +41,31 @@ class ScanResponse(BaseModel):
     reachable: bool
     status_code: int | None = None
     response_time_ms: int | None = None
+
+
+class ScheduleRequest(BaseModel):
+    url: HttpUrl
+    enabled: bool = True
+
+
+class ScheduleResponse(BaseModel):
+    url: str
+    enabled: bool
+    cadence: str = 'daily'
+    next_scan: str = '每天自动扫描'
+
+
+class AiReportRequest(BaseModel):
+    url: str
+    score: int
+    risks: list[RiskItem]
+
+
+def _database_user_id(db, user: dict | None) -> str | None:
+    if not user:
+        return None
+    database_user = db.query(User).filter_by(email=user['sub']).first()
+    return database_user.id if database_user else None
 
 
 def _is_private_host(hostname: str) -> bool:
@@ -72,7 +103,9 @@ def _check_response(response: httpx.Response, url: str, elapsed_ms: int) -> Scan
 
 
 @router.post('/scan', response_model=ScanResponse)
-async def scan_website(payload: ScanRequest):
+async def scan_website(payload: ScanRequest, user: dict | None = Depends(get_optional_user)):
+    if not user and not settings.GUEST_SCAN_ENABLED:
+        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail='访客扫描已关闭，请登录后继续')
     url = str(payload.url)
     parsed = urlparse(url)
     hostname = parsed.hostname
@@ -84,12 +117,75 @@ async def scan_website(payload: ScanRequest):
         async with httpx.AsyncClient(follow_redirects=True, timeout=httpx.Timeout(8.0, connect=4.0), headers={'User-Agent': 'SafeSight-Security-Checker/1.0'}) as client:
             response = await client.get(url)
     except (httpx.HTTPError, OSError) as exc:
-        return ScanResponse(
+        result = ScanResponse(
             url=url,
             score=0,
             risks=[RiskItem(name='目标无法访问', severity='High', description=f'检测请求未完成：{type(exc).__name__}。请确认域名可访问且已获得授权。', recommendation='确认 DNS、域名证书、防火墙和服务器状态正常，并确保检测服务器可以访问该站点。')],
             reachable=False,
             response_time_ms=round((perf_counter() - started) * 1000),
         )
+        with SessionLocal() as db:
+            db.add(ScanEvent(user_id=_database_user_id(db, user), url=url, status='目标无法访问', score=0, result_json=result.model_dump_json()))
+            db.commit()
+        return result
 
-    return _check_response(response, url, round((perf_counter() - started) * 1000))
+    result = _check_response(response, url, round((perf_counter() - started) * 1000))
+    with SessionLocal() as db:
+        db.add(ScanEvent(user_id=_database_user_id(db, user), url=url, status='已完成', score=result.score, result_json=result.model_dump_json()))
+        db.commit()
+    return result
+
+
+@router.get('/scan/history')
+async def scan_history(user: dict = Depends(get_current_user)):
+    with SessionLocal() as db:
+        user_id = _database_user_id(db, user)
+        events = db.query(ScanEvent).filter_by(user_id=user_id).order_by(ScanEvent.created_at.desc()).limit(50).all() if user_id else []
+        return [{**json.loads(event.result_json or '{}'), 'id': str(event.id), 'scannedAt': event.created_at.isoformat()} for event in events]
+
+
+@router.put('/scan/schedule', response_model=ScheduleResponse)
+async def update_scan_schedule(payload: ScheduleRequest, user: dict = Depends(get_current_user)):
+    with SessionLocal() as db:
+        user_id = _database_user_id(db, user)
+        if not user_id:
+            raise HTTPException(status_code=404, detail='user not found')
+        schedule = db.query(ScanSchedule).filter_by(user_id=user_id).first()
+        if not schedule:
+            schedule = ScanSchedule(user_id=user_id, url=str(payload.url), enabled=payload.enabled)
+            db.add(schedule)
+        else:
+            schedule.url = str(payload.url)
+            schedule.enabled = payload.enabled
+        db.commit()
+        return ScheduleResponse(url=schedule.url, enabled=schedule.enabled, cadence=schedule.cadence, next_scan=schedule.next_scan)
+
+
+@router.get('/scan/schedule', response_model=ScheduleResponse | None)
+async def get_scan_schedule(user: dict = Depends(get_current_user)):
+    with SessionLocal() as db:
+        user_id = _database_user_id(db, user)
+        schedule = db.query(ScanSchedule).filter_by(user_id=user_id).first() if user_id else None
+        return ScheduleResponse(url=schedule.url, enabled=schedule.enabled, cadence=schedule.cadence, next_scan=schedule.next_scan) if schedule else None
+
+
+@router.post('/scan/ai-report')
+async def generate_ai_report(payload: AiReportRequest, user: dict = Depends(get_current_user)):
+    if not settings.DEEPSEEK_API_KEY:
+        raise HTTPException(status_code=status.HTTP_503_SERVICE_UNAVAILABLE, detail='未配置 DEEPSEEK_API_KEY')
+
+    risk_text = '\n'.join(f"- {risk.name} ({risk.severity}): {risk.description}" for risk in payload.risks) or '- 未发现风险'
+    prompt = f"请为网站 {payload.url} 生成一份简洁、专业、面向非安全专家的中文安全检测报告。评分：{payload.score}/100。风险：\n{risk_text}\n请按总体判断、风险优先级、整改计划、复测建议四部分输出，不要编造检测结果。"
+    try:
+        async with httpx.AsyncClient(timeout=30.0) as client:
+            response = await client.post(
+                f'{settings.DEEPSEEK_BASE_URL}/chat/completions',
+                headers={'Authorization': f'Bearer {settings.DEEPSEEK_API_KEY}'},
+                json={'model': settings.DEEPSEEK_MODEL, 'messages': [{'role': 'user', 'content': prompt}], 'temperature': 0.2},
+            )
+            response.raise_for_status()
+            data = response.json()
+    except httpx.HTTPError as exc:
+        raise HTTPException(status_code=status.HTTP_502_BAD_GATEWAY, detail='DeepSeek 报告服务暂时不可用') from exc
+
+    return {'report': data['choices'][0]['message']['content'], 'model': settings.DEEPSEEK_MODEL}

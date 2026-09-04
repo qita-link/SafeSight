@@ -1,23 +1,51 @@
 import { demoHealth, demoLoginResponse, demoRisks, demoSummary } from '@/lib/demo-data';
 
+type AiReportRisk = { name: string; severity: string; description: string; recommendation: string };
+export type AuthResponse = { access_token: string; token_type: string; user: { id: string; email: string; username: string; plan: string; role?: string; email_verified?: boolean } };
+
 const API_BASE_URL = process.env.NEXT_PUBLIC_API_URL ?? 'http://localhost:8000';
 
 async function requestJson<T>(path: string, init?: RequestInit): Promise<T> {
-  const response = await fetch(`${API_BASE_URL}${path}`, {
-    ...init,
-    headers: {
-      'Content-Type': 'application/json',
-      Accept: 'application/json',
-      ...(init?.headers ?? {}),
-    },
-    cache: 'no-store',
-  });
+  const token = typeof window !== 'undefined' ? window.localStorage.getItem('safe_token') : null;
+  let response: Response;
+  try {
+    response = await fetch(`${API_BASE_URL}${path}`, {
+      ...init,
+      headers: {
+        'Content-Type': 'application/json',
+        Accept: 'application/json',
+        ...(token ? { Authorization: `Bearer ${token}` } : {}),
+        ...(init?.headers ?? {}),
+      },
+      cache: 'no-store',
+    });
+  } catch {
+    throw new Error(`无法连接后端服务，请确认 API 已启动（${API_BASE_URL}）`);
+  }
 
   if (!response.ok) {
     throw new Error(`Request failed: ${response.status}`);
   }
 
   return (await response.json()) as T;
+}
+
+export type Schedule = { url: string; enabled: boolean; cadence: string; next_scan: string };
+
+export async function apiGetSchedule() {
+  return requestJson<Schedule | null>('/api/v1/scan/schedule');
+}
+
+export async function apiSetSchedule(url: string, enabled: boolean) {
+  return requestJson<Schedule>('/api/v1/scan/schedule', { method: 'PUT', body: JSON.stringify({ url, enabled }) });
+}
+
+export async function apiScanHistory() {
+  return requestJson<Array<{ id: string; url?: string; score: number; risks: AiReportRisk[]; reachable: boolean; status_code?: number; response_time_ms?: number; scannedAt: string }>>('/api/v1/scan/history');
+}
+
+export async function apiGenerateAiReport(result: { url: string; score: number; risks: AiReportRisk[] }) {
+  return requestJson<{ report: string; model: string }>('/api/v1/scan/ai-report', { method: 'POST', body: JSON.stringify(result) });
 }
 
 export async function apiHealthCheck() {
@@ -29,17 +57,15 @@ export async function apiHealthCheck() {
 }
 
 export async function apiLogin(email: string, password: string) {
-  try {
-    return await requestJson<typeof demoLoginResponse>('/api/v1/auth/login', {
-      method: 'POST',
-      body: JSON.stringify({ email, password }),
-    });
-  } catch {
-    if (email === 'user@safesight.ai' && password === 'Demo@1234') {
-      return demoLoginResponse;
-    }
-    throw new Error('邮箱或密码不正确');
-  }
+  return requestJson<AuthResponse>('/api/v1/auth/login', { method: 'POST', body: JSON.stringify({ email, password }) });
+}
+
+export async function apiSendVerificationCode(email: string) {
+  return requestJson<{ message: string; dev_code?: string }>('/api/v1/auth/verification-code', { method: 'POST', body: JSON.stringify({ email }) });
+}
+
+export async function apiRegister(payload: { username: string; email: string; password: string; confirm_password: string; verification_code: string }) {
+  return requestJson<AuthResponse>('/api/v1/auth/register', { method: 'POST', body: JSON.stringify(payload) });
 }
 
 export async function apiRiskSummary() {
@@ -77,59 +103,25 @@ export async function apiScanWebsite(url: string) {
     if (error instanceof Error && /Request failed: 4\d\d/.test(error.message)) {
       throw new Error('URL 无效或目标地址不被允许');
     }
-    return {
-      url,
-      score: 67,
-      reachable: true,
-      status_code: 200,
-      response_time_ms: 120,
-      risks: [
-        {
-          name: '缺失 Content-Security-Policy',
-          severity: 'Medium',
-          description: '未配置内容安全策略，可能增加 XSS 与脚本执行风险。',
-          recommendation: '配置 Content-Security-Policy，先使用 Report-Only 模式验证规则，再逐步收紧。',
-        },
-        {
-          name: 'HSTS 未启用',
-          severity: 'High',
-          description: '缺少强制 HTTPS 策略，可能遭受中间人攻击。',
-          recommendation: '添加 Strict-Transport-Security: max-age=31536000; includeSubDomains。',
-        },
-        {
-          name: 'Cookie 缺少 Secure 属性',
-          severity: 'Medium',
-          description: 'Cookie 在传输过程中可能暴露于非加密通道。',
-          recommendation: '为敏感 Cookie 添加 Secure、HttpOnly 和适当的 SameSite 属性。',
-        },
-      ],
-    };
+    throw error;
   }
 }
 
 export async function apiAdminOverview() {
-  try {
-    return await requestJson<{
+  return requestJson<{
       total_users: number;
       total_scans: number;
       system_status: Record<string, string>;
       recent_activity: string[];
     }>('/api/v1/admin/overview');
-  } catch {
-    return {
-      total_users: 18240,
-      total_scans: 48220,
-      system_status: {
-        api: '正常',
-        postgresql: '正常',
-        redis: '正常',
-        ai_service: '正常',
-      },
-      recent_activity: [
-        'demo-company@safe.ai 完成检测',
-        'school-admin@safe.ai 新增用户',
-        'shop-owner@safe.ai 修复高危风险',
-      ],
-    };
-  }
 }
+
+export type AdminSettings = { registration_enabled: boolean; email_verification_enabled: boolean; guest_scan_enabled: boolean };
+export type AdminUser = { id: string; email: string; username: string; plan: string; email_verified: boolean; schedule?: Schedule };
+
+export async function apiAdminSettings() { return requestJson<AdminSettings>('/api/v1/admin/settings'); }
+export async function apiUpdateAdminSettings(payload: Partial<AdminSettings>) { return requestJson<AdminSettings>('/api/v1/admin/settings', { method: 'PUT', body: JSON.stringify(payload) }); }
+export async function apiAdminUsers() { return requestJson<AdminUser[]>('/api/v1/admin/users'); }
+export async function apiUpdateUserVerification(email: string, email_verified: boolean) { return requestJson<{ email: string; email_verified: boolean }>(`/api/v1/admin/users/${encodeURIComponent(email)}/verification`, { method: 'PATCH', body: JSON.stringify({ email_verified }) }); }
+export async function apiAdminSchedules() { return requestJson<Array<{ user: string } & Schedule>>('/api/v1/admin/schedules'); }
+export async function apiAdminDailyTasks() { return requestJson<Array<{ user: string; url: string; status: string; date: string }>>('/api/v1/admin/daily-tasks'); }

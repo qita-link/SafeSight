@@ -9,8 +9,8 @@ import { apiLogin } from '@/lib/api';
 
 export default function LoginPage() {
   const router = useRouter();
-  const [email, setEmail] = useState('user@safesight.ai');
-  const [password, setPassword] = useState('Demo@1234');
+  const [email, setEmail] = useState('');
+  const [password, setPassword] = useState('');
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [error, setError] = useState('');
 
@@ -23,7 +23,7 @@ export default function LoginPage() {
       const response = await apiLogin(email, password);
       localStorage.setItem('safe_token', response.access_token);
       localStorage.setItem('safe_user', JSON.stringify(response.user));
-      router.push('/dashboard');
+      router.push(response.user.role === 'super_admin' ? '/admin' : '/account');
     } catch (submitError) {
       setError(submitError instanceof Error ? submitError.message : '登录失败');
     } finally {
@@ -88,7 +88,7 @@ export default function LoginPage() {
           </form>
 
           <div className="mt-6 text-center text-sm text-slate-400">
-            还没有账号？ <Link href="#" className="text-blue-300">立即注册</Link>
+            还没有账号？ <Link href="/register" className="text-blue-300">立即注册</Link>
           </div>
         </div>
       </div>

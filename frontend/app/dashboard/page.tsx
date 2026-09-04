@@ -1,9 +1,10 @@
 'use client';
 
+import Link from 'next/link';
 import { useEffect, useState } from 'react';
-import { ArrowRight, CheckCircle2, FileText, History, ShieldAlert, ShieldCheck, TrendingUp, X, Zap } from 'lucide-react';
+import { ArrowRight, CheckCircle2, Clock3, FileText, History, ShieldAlert, ShieldCheck, Sparkles, TrendingUp, X, Zap } from 'lucide-react';
 
-import { apiHealthCheck, apiScanWebsite } from '@/lib/api';
+import { apiGenerateAiReport, apiHealthCheck, apiScanHistory, apiScanWebsite } from '@/lib/api';
 import { demoDashboardStats, demoScanSteps } from '@/lib/demo-data';
 
 type ScanRisk = {
@@ -38,17 +39,14 @@ export default function DashboardPage() {
   const [scanHistory, setScanHistory] = useState<ScanRecord[]>([]);
   const [report, setReport] = useState<ScanRecord | null>(null);
   const [showReportIndex, setShowReportIndex] = useState(false);
+  const [completedSteps, setCompletedSteps] = useState(0);
+  const [scanFinished, setScanFinished] = useState(false);
+  const [aiReport, setAiReport] = useState('');
+  const [isGeneratingAi, setIsGeneratingAi] = useState(false);
 
   useEffect(() => {
     apiHealthCheck().then(() => setStatus('在线')).catch(() => setStatus('演示模式'));
-    const savedHistory = window.localStorage.getItem('safesight-scan-history');
-    if (savedHistory) {
-      try {
-        setScanHistory(JSON.parse(savedHistory) as ScanRecord[]);
-      } catch {
-        window.localStorage.removeItem('safesight-scan-history');
-      }
-    }
+    apiScanHistory().then(setScanHistory).catch(() => undefined);
   }, []);
 
   const handleScan = async () => {
@@ -57,17 +55,17 @@ export default function DashboardPage() {
     setScanProgress(0);
     setScanError('');
     setScanResult(null);
+    setScanFinished(false);
+    setCompletedSteps(0);
     setFixedRiskNames(new Set());
+    const scanStartedAt = Date.now();
 
-    const interval = setInterval(() => {
-      setScanProgress((current) => {
-        const next = current + 12;
-        return next >= 100 ? 100 : next;
-      });
-    }, 220);
+    const interval = setInterval(() => setCompletedSteps((current) => Math.min(current + 1, demoScanSteps.length)), 1000);
 
     try {
       const result = await apiScanWebsite(siteUrl);
+      const remainingTime = Math.max(0, demoScanSteps.length * 1000 - (Date.now() - scanStartedAt));
+      await new Promise((resolve) => setTimeout(resolve, remainingTime));
       setScanResult(result);
       const record: ScanRecord = {
         ...result,
@@ -77,27 +75,35 @@ export default function DashboardPage() {
       };
       setScanHistory((current) => {
         const next = [record, ...current.filter((item) => item.url !== record.url)].slice(0, 12);
-        window.localStorage.setItem('safesight-scan-history', JSON.stringify(next));
         return next;
       });
       setStatus(result.reachable ? '检测完成' : '目标无法访问');
+      setCompletedSteps(demoScanSteps.length);
       setScanProgress(100);
+      setScanFinished(true);
     } catch (error) {
       setStatus('检测失败');
       setScanError(error instanceof Error ? error.message : '检测请求失败，请检查 URL 后重试');
     } finally {
-      setTimeout(() => {
-        clearInterval(interval);
-        setIsScanning(false);
-      }, 350);
+      clearInterval(interval);
+      setIsScanning(false);
     }
   };
 
-  const summary = scanResult?.risks ?? [
-    { name: '缺失 Content-Security-Policy', severity: 'Medium', description: '未配置内容安全策略。', recommendation: '配置 Content-Security-Policy，先使用 Report-Only 模式验证规则，再逐步收紧。' },
-    { name: 'HSTS 未启用', severity: 'High', description: '缺少强制 HTTPS 策略。', recommendation: '添加 Strict-Transport-Security: max-age=31536000; includeSubDomains。' },
-    { name: 'Cookie 缺少 Secure 属性', severity: 'Medium', description: 'Cookie 在非加密通道可能暴露。', recommendation: '为敏感 Cookie 添加 Secure、HttpOnly 和适当的 SameSite 属性。' },
-  ];
+  const generateAiReport = async () => {
+    if (!report) return;
+    setIsGeneratingAi(true);
+    try {
+      const result = await apiGenerateAiReport({ url: report.url ?? '', score: report.score, risks: report.risks });
+      setAiReport(result.report);
+    } catch {
+      setAiReport('AI 报告需要后端配置 DEEPSEEK_API_KEY。配置后可生成总体判断、风险优先级、整改计划与复测建议。');
+    } finally {
+      setIsGeneratingAi(false);
+    }
+  };
+
+  const summary = scanResult?.risks ?? [];
 
   const stats = scanResult
     ? [
@@ -139,6 +145,8 @@ export default function DashboardPage() {
             <h1 className="text-2xl font-bold">{siteUrl.replace(/^https?:\/\//, '')}</h1>
           </div>
           <div className="flex gap-3">
+            <Link href="/" className="btn-secondary">返回首页</Link>
+            <Link href="/account" className="btn-secondary">个人后台</Link>
             <input
               value={siteUrl}
               onChange={(event) => setSiteUrl(event.target.value)}
@@ -159,6 +167,11 @@ export default function DashboardPage() {
           ))}
         </div>
 
+        <section className="mb-8 grid gap-4 lg:grid-cols-[1fr_1.35fr]">
+          <div className="glass-card border-cyan-400/20 p-5"><div className="mb-3 flex items-center gap-2 text-lg font-semibold"><Clock3 className="h-5 w-5 text-cyan-300" />每日安全巡检</div><p className="mb-4 text-sm leading-6 text-slate-400">定时扫描已迁移到个人后台，登录后可绑定站点并管理任务。</p><Link href="/account" className="btn-primary px-4 py-2 text-sm">进入个人后台<ArrowRight className="ml-2 h-4 w-4" /></Link></div>
+          <div className="glass-card border-white/10 p-5"><div className="mb-3 flex items-center gap-2 text-lg font-semibold"><Sparkles className="h-5 w-5 text-violet-300" />检测策略</div><div className="grid gap-3 text-sm text-slate-300 sm:grid-cols-3"><div className="rounded-xl bg-white/[0.04] p-3"><b className="text-white">规则引擎</b><p className="mt-1 text-xs leading-5 text-slate-500">先验证可复现的安全信号</p></div><div className="rounded-xl bg-white/[0.04] p-3"><b className="text-white">逐项呈现</b><p className="mt-1 text-xs leading-5 text-slate-500">安全项与风险项完整留痕</p></div><div className="rounded-xl bg-white/[0.04] p-3"><b className="text-white">持续跟踪</b><p className="mt-1 text-xs leading-5 text-slate-500">每日结果汇入趋势曲线</p></div></div></div>
+        </section>
+
         <div className="grid gap-6 lg:grid-cols-[1.2fr_0.8fr]">
           <div className="glass-card p-6">
             <div className="mb-5 flex items-center justify-between">
@@ -166,7 +179,7 @@ export default function DashboardPage() {
                 <Zap className="h-5 w-5 text-cyan-300" />
                 {status}
               </div>
-              <div className="text-sm text-cyan-300">{scanProgress}%</div>
+              <div className="text-sm text-cyan-300">{Math.round((completedSteps / demoScanSteps.length) * 100)}%</div>
             </div>
 
             {scanResult && (
@@ -182,18 +195,20 @@ export default function DashboardPage() {
             {scanError && <div className="mb-4 rounded-xl border border-red-400/20 bg-red-400/10 p-3 text-sm text-red-200">{scanError}</div>}
 
             <div className="mb-4 h-2.5 w-full overflow-hidden rounded-full bg-slate-800">
-              <div className="h-full rounded-full bg-gradient-to-r from-blue-500 to-violet-500" style={{ width: `${scanProgress}%` }} />
+              <div className="h-full rounded-full bg-gradient-to-r from-blue-500 to-violet-500 transition-all duration-500" style={{ width: `${Math.round((completedSteps / demoScanSteps.length) * 100)}%` }} />
             </div>
 
             <div className="space-y-3">
-              {demoScanSteps.map((step, index) => (
-                <div key={step} className="flex items-center gap-3 rounded-xl border border-white/10 bg-slate-900/60 p-3">
-                  <div className="flex h-7 w-7 items-center justify-center rounded-full bg-emerald-500/20 text-[10px] text-emerald-300">
-                    {index < 9 ? '✓' : `${index + 1}`}
-                  </div>
-                  <div className="text-sm text-slate-200">{String(index + 1).padStart(2, '0')} {step}</div>
+              {demoScanSteps.map((step, index) => {
+                const done = index < completedSteps;
+                const matchingRisk = scanFinished && scanResult?.risks.find((risk) => (index === 1 && (risk.name.includes('HTTPS') || risk.name.includes('HSTS'))) || (index === 3 && (risk.name.includes('Content') || risk.name.includes('点击劫持'))) || (index === 4 && risk.name.includes('Cookie')));
+                const stepLabel = !done ? '等待检测' : !scanFinished ? '分析中' : matchingRisk ? '发现风险' : '安全';
+                return <div key={step} className={`flex items-center gap-3 rounded-xl border p-3 transition ${done && matchingRisk ? 'border-orange-400/30 bg-orange-400/[0.06]' : done ? 'border-emerald-400/20 bg-emerald-400/[0.05]' : 'border-white/10 bg-slate-900/60'}`}>
+                  <div className={`flex h-7 w-7 items-center justify-center rounded-full text-[10px] ${done && matchingRisk ? 'bg-orange-500/20 text-orange-300' : done && scanFinished ? 'bg-emerald-500/20 text-emerald-300' : done ? 'bg-cyan-500/20 text-cyan-300' : 'bg-slate-800 text-slate-500'}`}>{done ? (matchingRisk ? '!' : scanFinished ? '✓' : '…') : `${index + 1}`}</div>
+                  <div className="min-w-0 text-sm text-slate-200">{String(index + 1).padStart(2, '0')} {step}<span className={`ml-2 text-xs ${done && matchingRisk ? 'text-orange-300' : done && scanFinished ? 'text-emerald-300' : done ? 'text-cyan-300' : 'text-slate-500'}`}>{stepLabel}</span></div>
+                  {done && <CheckCircle2 className={`ml-auto h-4 w-4 ${matchingRisk ? 'text-orange-300' : 'text-emerald-300'}`} />}
                 </div>
-              ))}
+              })}
             </div>
           </div>
 
@@ -204,7 +219,7 @@ export default function DashboardPage() {
                 发现风险摘要
               </div>
               <div className="space-y-3 text-sm text-slate-200">
-                {summary.map((item) => (
+                {!scanFinished ? <div className="rounded-xl border border-cyan-400/20 bg-cyan-400/[0.05] p-4 text-sm text-cyan-200">检测完成后将显示风险分析结果。</div> : summary.length === 0 ? <div className="rounded-xl border border-emerald-400/20 bg-emerald-400/[0.06] p-4 text-sm text-emerald-300">本次检测未发现风险。</div> : summary.map((item) => (
                   <div key={item.name} className="rounded-xl border border-white/10 bg-slate-900/60 p-3">
                     <div className="flex items-center justify-between gap-3">
                       <span className="font-medium">{item.name}</span>
@@ -332,7 +347,7 @@ export default function DashboardPage() {
           <div className="max-h-[90vh] w-full max-w-3xl overflow-y-auto rounded-2xl border border-cyan-400/30 bg-slate-950 p-6 shadow-[0_0_60px_rgba(34,211,238,0.15)]">
             <div className="mb-6 flex items-start justify-between border-b border-white/10 pb-5">
               <div><div className="text-xs uppercase tracking-[0.25em] text-cyan-300/70">SECURITY REPORT</div><h2 className="mt-2 text-2xl font-bold">{reportHost}</h2><p className="mt-1 text-xs text-slate-500">检测时间：{new Date(report.scannedAt).toLocaleString('zh-CN')}</p></div>
-              <button onClick={() => setReport(null)} title="关闭报告" className="rounded-lg p-2 text-slate-400 hover:bg-white/10 hover:text-white"><X className="h-5 w-5" /></button>
+              <div className="flex items-center gap-2"><button onClick={generateAiReport} disabled={isGeneratingAi} className="btn-primary px-3 py-2 text-xs disabled:opacity-60"><Sparkles className="mr-1.5 h-3.5 w-3.5" />{isGeneratingAi ? 'AI 分析中...' : 'AI 检测报告'}</button><button onClick={() => setReport(null)} title="关闭报告" className="rounded-lg p-2 text-slate-400 hover:bg-white/10 hover:text-white"><X className="h-5 w-5" /></button></div>
             </div>
             <div className="mb-6 grid grid-cols-3 gap-3">
               <div className="rounded-xl border border-cyan-400/20 bg-cyan-400/10 p-4"><div className="text-xs text-slate-400">安全评分</div><div className="mt-1 text-3xl font-bold text-cyan-300">{report.score}</div></div>
@@ -344,6 +359,7 @@ export default function DashboardPage() {
                 <div key={risk.name} className="rounded-xl border border-white/10 bg-white/[0.04] p-4"><div className="flex items-center justify-between gap-3"><span className="font-medium">{risk.name}</span><span className={risk.severity === 'High' ? 'text-orange-300' : risk.severity === 'Medium' ? 'text-yellow-300' : 'text-slate-400'}>{risk.severity}</span></div><p className="mt-2 text-sm leading-6 text-slate-400">{risk.description}</p><p className="mt-3 border-l-2 border-cyan-400/60 pl-3 text-sm leading-6 text-cyan-100"><span className="font-semibold text-cyan-300">修复建议：</span>{risk.recommendation}</p></div>
               ))}
             </div>
+            {aiReport ? <div className="mt-5 rounded-xl border border-violet-400/20 bg-violet-400/[0.06] p-4"><div className="mb-2 flex items-center gap-2 font-semibold text-violet-200"><Sparkles className="h-4 w-4" />AI 检测报告</div><div className="whitespace-pre-wrap text-sm leading-7 text-slate-300">{aiReport}</div></div> : null}
           </div>
         </div>
       )}

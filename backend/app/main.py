@@ -5,6 +5,7 @@ from app.api.v1.admin import router as admin_router
 from app.api.v1.auth import router as auth_router
 from app.api.v1.scan import router as scan_router
 from app.config import settings
+from app.db import init_db
 
 app = FastAPI(
     title=settings.APP_NAME,
@@ -25,6 +26,11 @@ app.add_middleware(
 app.include_router(auth_router, prefix="/api/v1")
 app.include_router(scan_router, prefix="/api/v1")
 app.include_router(admin_router, prefix="/api/v1")
+
+
+@app.on_event('startup')
+async def startup_event():
+    init_db()
 
 
 @app.get("/health")

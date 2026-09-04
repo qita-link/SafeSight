@@ -1,4 +1,6 @@
+ 'use client';
 import Link from 'next/link';
+import { useEffect, useState } from 'react';
 import { ArrowRight, Bot, ChartNoAxesCombined, ShieldCheck, Sparkles, CheckCircle2, LockKeyhole, Radar, Cpu } from 'lucide-react';
 
 const stats = [
@@ -18,6 +20,8 @@ const riskCards = [
 const scanItems = ['SSL', 'HTTP Header', 'Cookie', 'DNS', '开放服务', 'Web配置', 'CMS', '第三方组件', '安全策略'];
 
 export default function HomePage() {
+  const [user, setUser] = useState<{ role?: string } | null>(null);
+  useEffect(() => { const stored = localStorage.getItem('safe_user'); if (stored) setUser(JSON.parse(stored)); }, []);
   return (
     <main className="min-h-screen text-white">
       <div className="mx-auto max-w-7xl px-6 pb-16 pt-6">
@@ -34,14 +38,14 @@ export default function HomePage() {
           <nav className="hidden items-center gap-8 text-sm text-slate-300 md:flex">
             <Link href="#">首页</Link>
             <Link href="/dashboard">安全检测</Link>
-            <Link href="/admin">后台</Link>
+            {user?.role === 'super_admin' ? <Link href="/admin">管理后台</Link> : user ? <Link href="/account">个人后台</Link> : null}
             <Link href="/risks">风险中心</Link>
-            <Link href="#">安全报告</Link>
-            <Link href="#">解决方案</Link>
-            <Link href="#">安全知识库</Link>
+            <Link href="/dashboard">安全报告</Link>
+            <Link href="/solutions">解决方案</Link>
+            <Link href="https://safeblog.qita.link/" target="_blank">安全知识库</Link>
           </nav>
           <div className="flex items-center gap-3">
-            <Link href="/login" className="btn-secondary">登录</Link>
+            {user ? <Link href={user.role === 'super_admin' ? '/admin' : '/account'} className="btn-secondary">进入控制台</Link> : <><Link href="/login" className="btn-secondary">登录</Link><Link href="/register" className="btn-secondary">注册</Link></>}
             <Link href="/dashboard" className="btn-primary">免费检测</Link>
           </div>
         </header>
@@ -130,6 +134,13 @@ export default function HomePage() {
               <p className="mt-3 text-sm leading-7 text-slate-300">{item.description}</p>
             </div>
           ))}
+        </section>
+
+        <section className="mb-12 border-y border-white/10 py-10">
+          <div className="grid gap-8 lg:grid-cols-[0.8fr_1.2fr] lg:items-end">
+            <div><div className="text-xs uppercase tracking-[0.25em] text-cyan-300/70">WHY SAFESIGHT</div><h2 className="mt-3 text-3xl font-bold">把一次检测，变成持续的安全判断。</h2><p className="mt-4 max-w-lg text-sm leading-7 text-slate-400">安盾云检先用可验证的规则检查站点暴露面，再用清晰的语言解释影响。登录后还可以每天自动复测，观察评分和风险是否真的改善。</p></div>
+            <div className="grid gap-3 sm:grid-cols-3"><div className="border-l border-cyan-400/40 pl-4"><div className="text-2xl font-bold text-cyan-300">01</div><div className="mt-2 text-sm font-medium">看见信号</div><div className="mt-1 text-xs leading-5 text-slate-500">响应头、HTTPS、Cookie 等关键面</div></div><div className="border-l border-violet-400/40 pl-4"><div className="text-2xl font-bold text-violet-300">02</div><div className="mt-2 text-sm font-medium">理解影响</div><div className="mt-1 text-xs leading-5 text-slate-500">按严重程度排列，给出可执行建议</div></div><div className="border-l border-emerald-400/40 pl-4"><div className="text-2xl font-bold text-emerald-300">03</div><div className="mt-2 text-sm font-medium">持续复测</div><div className="mt-1 text-xs leading-5 text-slate-500">每日趋势记录整改后的变化</div></div></div>
+          </div>
         </section>
 
         <section className="grid gap-5 pb-12 lg:grid-cols-2">
